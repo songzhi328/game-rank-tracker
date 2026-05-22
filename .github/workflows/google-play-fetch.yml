@@ -18,6 +18,11 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install Playwright + Chromium
+        run: |
+          pip install playwright
+          python3 -m playwright install chromium
+
       - name: Fetch Google Play rankings & upload to Gitee
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
@@ -25,4 +30,4 @@ jobs:
           GITEE_REPO: ${{ secrets.GITEE_REPO }}
           GITEE_PATH: google_play_rankings.json
         run: |
-          python3 gitee_mirror/fetch_and_upload.py
+          python3 gitee_mirror/fetch_and_upload.py --playwright

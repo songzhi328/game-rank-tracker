@@ -61,6 +61,11 @@ FETCH_HEADERS = {
 }
 
 REQUEST_TIMEOUT = 30
+MAX_APPS = 200  # Target apps per region
+
+# Google Play collection page (JS-rendered, needs Playwright)
+# Shows top-200+ free apps; the /category/GAME page only has ~50 server-rendered
+COLLECTION_URL = "https://play.google.com/store/apps/collection/topselling_free?gl={country}&hl=en"
 
 
 def parse_af_initdata(html: str) -> List[Dict]:
@@ -196,11 +201,124 @@ def fetch_region(region_code: str) -> Optional[Dict[str, Dict[str, int]]]:
     return result
 
 
-def gather_all_regions() -> Dict:
-    """Fetch all regions and return the full data structure."""
+def _fetch_region_with_playwright(region_code: str) -> Optional[Dict[str, Dict[str, int]]]:
+    """
+    Use Playwright to load Google Play collection page with full JS rendering.
+    Scrolls to trigger lazy loading and get up to MAX_APPS (200) apps per region.
+
+    Returns:
+        {package_name: {"free": rank, "paid": rank}} or None on failure.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        logger.info("playwright not installed, skipping Playwright fetch for %s", region_code)
+        return None
+
+    url = COLLECTION_URL.format(country=region_code)
+    logger.info("Playwright: fetching %s (%s)…", region_code, url)
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-setuid-sandbox"],
+            )
+            context = browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+                viewport={"width": 1366, "height": 768},
+                locale="en-US",
+            )
+            page = context.new_page()
+
+            # Block resource-heavy third-party requests
+            page.route("**/*", lambda route: (
+                route.abort()
+                if any(d in route.request.url for d in [
+                    "google-analytics", "doubleclick", "googlesyndication",
+                    "googleadservices", "youtube.com", "facebook.net",
+                ])
+                else route.continue_()
+            ))
+
+            page.goto(url, wait_until="networkidle", timeout=60000)
+            page.wait_for_timeout(3000)  # extra wait for JS rendering
+
+            seen: set = set()
+            all_pkgs: List[str] = []
+
+            for scroll_round in range(15):  # up to 15 scrolls
+                # Extract package names from visible app links
+                pkgs = page.evaluate("""() => {
+                    const links = document.querySelectorAll('a[href*="?id="]');
+                    const results = [];
+                    const vs = new Set();
+                    for (const link of links) {
+                        const m = link.href.match(/[?&]id=([^&]+)/);
+                        if (m && !vs.has(m[1]) && m[1].includes('.')) {
+                            vs.add(m[1]);
+                            results.push(m[1]);
+                        }
+                    }
+                    return results;
+                }""")
+
+                prev_count = len(all_pkgs)
+                for pkg in pkgs:
+                    if pkg not in seen:
+                        seen.add(pkg)
+                        all_pkgs.append(pkg)
+
+                logger.info("  %s scroll %d: %d apps (%d new)",
+                            region_code, scroll_round + 1, len(all_pkgs),
+                            len(all_pkgs) - prev_count)
+
+                if len(all_pkgs) >= MAX_APPS:
+                    break
+
+                if scroll_round > 0 and len(all_pkgs) == prev_count:
+                    logger.info("  %s: no new apps after scrolling, reached end", region_code)
+                    break
+
+                # Scroll down to trigger lazy loading
+                page.evaluate("window.scrollBy(0, 3000)")
+                page.wait_for_timeout(2500)
+
+            browser.close()
+
+            if not all_pkgs:
+                logger.warning("Playwright %s: no apps found", region_code)
+                return None
+
+            result = {}
+            for rank, pkg in enumerate(all_pkgs[:MAX_APPS], start=1):
+                result[pkg] = {"free": rank, "paid": rank}
+
+            logger.info("  %s final: %d apps via Playwright", region_code, len(result))
+            return result
+
+    except Exception as exc:
+        logger.warning("Playwright %s failed: %s", region_code, exc)
+        return None
+
+
+def gather_all_regions(use_playwright: bool = False) -> Dict:
+    """Fetch all regions and return the full data structure.
+
+    Args:
+        use_playwright: If True, use Playwright for JS-rendered pages
+                        to get up to MAX_APPS per region.
+    """
     regions_data = {}
     for name, code in REGIONS.items():
-        data = fetch_region(code)
+        if use_playwright:
+            data = _fetch_region_with_playwright(code)
+        else:
+            data = fetch_region(code)
         if data:
             regions_data[code] = data
         else:
@@ -281,10 +399,12 @@ def main():
     owner = os.environ.get("GITEE_OWNER", "")
     repo = os.environ.get("GITEE_REPO", "")
     file_path = os.environ.get("GITEE_PATH", "google_play_rankings.json")
+    use_playwright = "--playwright" in sys.argv or os.environ.get("PLAYWRIGHT", "").strip() == "1"
 
     # Fetch data
-    logger.info("=== Fetching Google Play rankings ===")
-    data = gather_all_regions()
+    logger.info("=== Fetching Google Play rankings (%s) ===",
+                "Playwright" if use_playwright else "direct HTTP")
+    data = gather_all_regions(use_playwright=use_playwright)
 
     total_apps = sum(len(pkgs) for pkgs in data["regions"].values())
     total_regions = len(data["regions"])

@@ -67,6 +67,8 @@ REGIONS = {
     "hk": "香港",
     "mo": "澳门",
     "tw": "台湾",
+    "my": "马来西亚",
+    "vn": "越南",
 }
 
 # ---- iOS App Store: MZStore Endpoint ----
