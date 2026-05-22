@@ -16,7 +16,7 @@ DEFAULT_GAMES = [
     {
         "name": "火炬之光：无限",
         "app_id": "1528917194",  # CN default
-        "google_app_id": "com.xd.torchlight.cn",  # CN Google Play ID
+        "google_app_id": "com.xd.TLglobal",  # Global Google Play ID (Torchlight: Infinite)
         "region_ids": {
             "cn": "1528917194",
             "us": "1593130084",
@@ -35,7 +35,7 @@ DEFAULT_GAMES = [
     {
         "name": "心动小镇",
         "app_id": "1561903786",  # CN default
-        "google_app_id": "com.xd.xdtown.googlepay",  # CN Google Play ID
+        "google_app_id": "com.xd.xdtglobal.gp",  # Global Google Play ID (Heartopia)
         "region_ids": {
             "cn": "1561903786",
             "us": "6746151928",
