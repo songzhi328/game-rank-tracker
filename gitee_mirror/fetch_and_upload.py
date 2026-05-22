@@ -408,7 +408,7 @@ def gitee_upload(
             headers={"Content-Type": "application/json;charset=UTF-8"},
             method="PUT",
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=240) as resp:
             resp_data = json.loads(resp.read().decode("utf-8"))
             logger.info("Uploaded to Gitee: %s", resp_data.get("content", {}).get("path", path))
             return True
