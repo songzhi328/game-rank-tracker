@@ -203,8 +203,9 @@ def fetch_region(region_code: str) -> Optional[Dict[str, Dict[str, int]]]:
 
 def _fetch_region_with_playwright(region_code: str) -> Optional[Dict[str, Dict[str, int]]]:
     """
-    Use Playwright to load Google Play collection page with full JS rendering.
-    Scrolls to trigger lazy loading and get up to MAX_APPS (200) apps per region.
+    Use Playwright to load Google Play category page with full JS rendering.
+    Starts with server-rendered AF_initDataCallback data (~50 apps), then scrolls
+    to trigger lazy loading and get up to MAX_APPS (200) apps per region.
 
     Returns:
         {package_name: {"free": rank, "paid": rank}} or None on failure.
@@ -215,7 +216,8 @@ def _fetch_region_with_playwright(region_code: str) -> Optional[Dict[str, Dict[s
         logger.info("playwright not installed, skipping Playwright fetch for %s", region_code)
         return None
 
-    url = COLLECTION_URL.format(country=region_code)
+    # Use the category page (server-rendered) - more reliable than collection page
+    url = PLAY_URL.format(country=region_code)
     logger.info("Playwright: fetching %s (%s)…", region_code, url)
 
     try:
@@ -248,45 +250,71 @@ def _fetch_region_with_playwright(region_code: str) -> Optional[Dict[str, Dict[s
             page.goto(url, wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(3000)  # extra wait for JS rendering
 
+            # ---- Strategy 1: Extract from server-rendered AF_initDataCallback ----
+            html_content = page.content()
+            server_apps = parse_af_initdata(html_content)
+            logger.info("  %s: %d apps from AF_initDataCallback", region_code, len(server_apps))
+
             seen: set = set()
             all_pkgs: List[str] = []
 
-            for scroll_round in range(15):  # up to 15 scrolls
-                # Extract package names from visible app links
-                pkgs = page.evaluate("""() => {
-                    const links = document.querySelectorAll('a[href*="?id="]');
-                    const results = [];
-                    const vs = new Set();
-                    for (const link of links) {
-                        const m = link.href.match(/[?&]id=([^&]+)/);
-                        if (m && !vs.has(m[1]) && m[1].includes('.')) {
-                            vs.add(m[1]);
-                            results.push(m[1]);
-                        }
-                    }
-                    return results;
-                }""")
+            # Add server-rendered apps first (deduplicated)
+            for app in server_apps:
+                pkg = app.get("package_name", "")
+                if pkg and pkg not in seen:
+                    seen.add(pkg)
+                    all_pkgs.append(pkg)
 
+            # ---- Strategy 2: Scroll and extract from DOM ----
+            # Multiple selector patterns used by Google Play
+            selectors = [
+                'a[href*="?id="]',
+                'a[href*="/store/apps/details?"]',
+                'a[href*="details?id="]',
+            ]
+
+            for scroll_round in range(20):  # up to 20 scrolls
                 prev_count = len(all_pkgs)
-                for pkg in pkgs:
-                    if pkg not in seen:
-                        seen.add(pkg)
-                        all_pkgs.append(pkg)
 
-                logger.info("  %s scroll %d: %d apps (%d new)",
-                            region_code, scroll_round + 1, len(all_pkgs),
-                            len(all_pkgs) - prev_count)
+                # Try all selectors to extract package names
+                for selector in selectors:
+                    try:
+                        found = page.evaluate(f"""() => {{
+                            const links = document.querySelectorAll('{selector}');
+                            const results = [];
+                            const vs = new Set();
+                            for (const link of links) {{
+                                const m = link.href.match(/[?&]id=([^&]+)/);
+                                if (m && !vs.has(m[1]) && m[1].includes('.')) {{
+                                    vs.add(m[1]);
+                                    results.push(m[1]);
+                                }}
+                            }}
+                            return results;
+                        }}""")
+                        for pkg in found:
+                            if pkg not in seen:
+                                seen.add(pkg)
+                                all_pkgs.append(pkg)
+                    except Exception:
+                        pass
+
+                new_count = len(all_pkgs) - prev_count
+                if new_count > 0 or scroll_round == 0:
+                    logger.info("  %s scroll %d: %d apps (+%d)",
+                                region_code, scroll_round + 1, len(all_pkgs), new_count)
 
                 if len(all_pkgs) >= MAX_APPS:
+                    logger.info("  %s: reached %d apps, stopping", region_code, MAX_APPS)
                     break
 
-                if scroll_round > 0 and len(all_pkgs) == prev_count:
-                    logger.info("  %s: no new apps after scrolling, reached end", region_code)
+                if scroll_round > 0 and new_count == 0:
+                    logger.info("  %s: no new apps after scroll, reached end", region_code)
                     break
 
                 # Scroll down to trigger lazy loading
-                page.evaluate("window.scrollBy(0, 3000)")
-                page.wait_for_timeout(2500)
+                page.evaluate("window.scrollBy(0, 4000)")
+                page.wait_for_timeout(3000)
 
             browser.close()
 
