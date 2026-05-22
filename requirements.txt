@@ -1,0 +1,6 @@
+Flask==3.0.3
+APScheduler==3.10.4
+requests==2.32.3
+gplay-scraper>=1.0.6
+playwright>=1.60.0
+curl_cffi>=0.15.0

@@ -1,0 +1,28 @@
+name: Google Play Rankings Fetch
+
+on:
+  schedule:
+    # Run at 21:00 CST (13:00 UTC) daily - matches existing cron
+    - cron: '0 13 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  fetch-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Fetch Google Play rankings & upload to Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_OWNER: ${{ secrets.GITEE_OWNER }}
+          GITEE_REPO: ${{ secrets.GITEE_REPO }}
+          GITEE_PATH: google_play_rankings.json
+        run: |
+          python3 gitee_mirror/fetch_and_upload.py

@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv
+venv/
+*.db
+rank_tracker.db
+.gitee_credentials
+.DS_Store
+node_modules/
+.vscode/
