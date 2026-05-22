@@ -47,6 +47,7 @@ REGIONS = {
     "us": "US", "gb": "GB", "jp": "JP", "kr": "KR",
     "sg": "SG", "th": "TH", "de": "DE", "fr": "FR",
     "hk": "HK", "tw": "TW",
+    "mo": "MO", "my": "MY", "vn": "VN",
 }
 
 FETCH_HEADERS = {

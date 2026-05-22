@@ -148,6 +148,9 @@ GOOGLE_PLAY_REGIONS = {
     "fr": "FR",
     "hk": "HK",
     "tw": "TW",
+    "mo": "MO",
+    "my": "MY",
+    "vn": "VN",
 }
 
 GOOGLE_PLAY_HEADERS = {
